@@ -80,7 +80,6 @@ async def mute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     permissions = ChatPermissions(can_send_messages=False)
     await context.bot.restrict_chat_member(update.effective_chat.id, target_user.id, permissions=permissions)
     await update.message.reply_text(f"تم كتم العضو {target_user.full_name} بنجاح 🔇")
-    if __name__ == '__main__':
     # إنشاء التطبيق
     app = ApplicationBuilder().token(TOKEN).build()
 
