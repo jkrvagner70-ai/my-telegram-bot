@@ -80,8 +80,8 @@ async def mute_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     permissions = ChatPermissions(can_send_messages=False)
     await context.bot.restrict_chat_member(update.effective_chat.id, target_user.id, permissions=permissions)
     await update.message.reply_text(f"تم كتم العضو {target_user.full_name} بنجاح 🔇")
-
-if __name__ == '__main__':
+    if __name__ == '__main__':
+    # إنشاء التطبيق
     app = ApplicationBuilder().token(TOKEN).build()
 
     # تسجيل الأوامر والخدمات
@@ -90,6 +90,13 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("ban", ban_user))
     app.add_handler(CommandHandler("mute", mute_user))
     
+    # الترحيب والتوديع والرد التلقائي
+    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_member))
+    app.add_handler(MessageHandler(filters.StatusUpdate.LEFT_CHAT_MEMBER, goodbye_member))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, auto_reply))
+
+    print("البوت الشامل يعمل الآن...")
+    app.run_polling()
     # الترحيب والتوديع والرد التلقائي
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_member))
     app.add_handler(MessageHandler(filters.StatusUpdate.LEFT_CHAT_MEMBER, goodbye_member))
