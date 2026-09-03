@@ -1,12 +1,17 @@
 import logging
+import os  # ← أضفنا هذا السطر لقراءة متغيرات البيئة
 from telegram import Update, ChatPermissions
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler, 
     filters, ContextTypes
 )
 
+# ✅ قراءة التوكن من متغيرات البيئة (وليس كتابته في الكود)
+TOKEN = os.getenv("TOKEN")
 
-TOKEN = "8953411555:AAE0N3orueNQ4A6sUVdBrQ7a5HK2NClG0bc"
+if not TOKEN:
+    raise ValueError("❌ خطأ: لم يتم العثور على متغير البيئة 'TOKEN'.\n"
+                     "الرجاء إضافته في إعدادات Render تحت اسم 'TOKEN'.")
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -17,7 +22,7 @@ logging.basicConfig(
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("أهلاً بك! البوت يعمل بنجاح ومستعد لإدارة المجموعة 🚀")
 
-# 2. الترحيب بالإعضاء الجدد تلقائياً
+# 2. الترحيب بالإعضاء الجدد تلقائيااً
 async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for member in update.message.new_chat_members:
         await update.message.reply_text(f"أهلاً بك يا {member.full_name} في المجموعه! 🥳✨")
@@ -92,4 +97,3 @@ if __name__ == '__main__':
 
     print("البوت الشامل يعمل الآن...")
     app.run_polling()
-  
