@@ -1,272 +1,236 @@
-from flask import Flask
+import os
+import logging
 from threading import Thread
+from flask import Flask
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update
+)
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    ContextTypes,
+    filters
+)
 
+# ==========================================
+# 1. إعداد سيرفر Flask لإبقاء الخدمة نشطة 24/7
+# ==========================================
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "Bot is running!"
+    return "Server is online and monitoring."
 
 def run():
-    app.run(host='0.0.0.0', port=8080)
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
 
 def keep_alive():
     t = Thread(target=run)
+    t.daemon = True
     t.start()
 
-keep_alive()  # تشغيل السيرفر الوهمي في الخلفية
+# تشغيل السيرفر المباشر
+keep_alive()
 
-import logging
-import re
-from collections import defaultdict
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    BotCommand
-)
-from telegram.constants import ChatMemberStatus, ParseMode
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
-)
-
-# إعداد التسجيل (Logging)
+# ==========================================
+# 2. إعداد السجلات (Logging) وقاعدة البيانات المقتطعة
+# ==========================================
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 
-# ==================== 🔑 ضع التوكن هنا ====================
+# ذاكرة حفظ بيانات المستخدمين لمنع الاحتيال
+user_history = {}
+
+# استدعاء التوكين بآمان من متغيرات البيئة
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-# ==========================================================
-
-# ذاكرة لتخزين أسماء وأيوزرات الأعضاء لكشف التغييرات 🕵️‍♂️
-user_cache = {}
-
-# إعدادات وقواعد بيانات الجروبات المؤقتة 💾
-chat_settings = defaultdict(lambda: {
-    "anti_link": True,
-    "rules": "مفيش قوانين محددة لسه يا غالي! 📜",
-    "replies": {
-        "السلام عليكم": "وعليكم السلام ورحمة الله وبركاته يا بعد قلبي! 💖🖐️",
-        "هلا": "أهلاً وسهلاً! نورت المكان يا عسل ✨🔥",
-        "منور": "بنورك يا قلبي والله! 🌟❤️",
-        "البوت": "عيون البوت! تؤمرني بإيه؟ 🤖⚡"
-    }
-})
-
-# 1️⃣ قائمة الأوامر الرسمية في زر Menu 🎯
-async def post_init(application: Application):
-    commands = [
-        BotCommand("start", "بداية البوت والترحيب 🚀"),
-        BotCommand("rank", "معرفة رتبتك ومعلوماتك 👑"),
-        BotCommand("rules", "عرض قوانين الجروب 📜"),
-        BotCommand("setrules", "تعديل القوانين (للمشرفين) ✏️"),
-        BotCommand("addreply", "إضافة رد تلقائي (للمشرفين) 💬"),
-        BotCommand("delreply", "حذف رد تلقائي (للمشرفين) ❌"),
-        BotCommand("settings", "إعدادات الحماية ⚙️"),
-    ]
-    await application.bot.set_my_commands(commands)
-
-# 2️⃣ أمر /start 🥳
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    welcome_text = (
-        "يا هلا ويا مرحبا بيك يا غالي! 🥳🔥\n\n"
-        "أنا **بوت الحماية والتسلية** لجروبك! 🤖⚡\n"
-        "شغلي أحمي الجروب، أرحب بالأعضاء، وأقفش أي حد يغير اسمه أو يوزره! 🕵️‍♂️💥\n\n"
-        "📌 **الخصائص والوظائف اللي أقدر أعملها:**\n"
-        "✨ **كشف التغيرات:** لو حد غير اسمه أو يوزره هفضحه بالجروب فوراً! 📢\n"
-        "👑 **الرتب:** تقدر تعرف رتبتك بأمر `/rank`\n"
-        "🛑 **الحماية:** منع الروابط والإعلانات التلقائية\n"
-        "💬 **ردود ذكية:** ردود تلقائية تقدر تضيفها بنفسك\n"
-        "👋 **ترحيب ووداع:** بالاسم واليوزر بشكل شيك\n\n"
-        "ضيفني لجروبك وارفعني **مشرف (Admin)** عشان أشتغل معاك فل الفل! 🚀"
-    )
-    
-    keyboard = [
-        [InlineKeyboardButton("➕ ضيف البوت لجروبك من هنا", url=f"https://t.me/{context.bot.username}?startgroup=true")]
-    ]
-    await update.message.reply_text(welcome_text, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
-
-# 3️⃣ معرفة رتبة المستخدم 👑
-async def get_user_rank(chat_id, user_id, context):
-    try:
-        member = await context.bot.get_chat_member(chat_id, user_id)
-        if member.status == ChatMemberStatus.OWNER:
-            return "المالك الأصلي 👑🔥"
-        elif member.status == ChatMemberStatus.ADMINISTRATOR:
-            return "مشرف الجروب 👮‍♂️⚡"
-        else:
-            return "عضو منورنا 👤✨"
-    except:
-        return "عضو 👤"
-
-async def rank_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ==========================================
+# 3. نظام كشف تغيير الاسم واليوزر (منع الاحتيال)
+# ==========================================
+async def track_user_changes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    chat_id = update.effective_chat.id
-    
-    rank = await get_user_rank(chat_id, user.id, context)
-    username = f"@{user.username}" if user.username else "مفيش يوزر ❌"
-    
-    text = (
-        f"🏷️ **بطاقة معلوماتك يا بطل:**\n\n"
-        f"👤 **الاسم:** {user.first_name}\n"
-        f"ال **اليوزر:** {username}\n"
-        f"🆔 **الأيدي (ID):** `{user.id}`\n"
-        f"🎖️ **الرتبة:** {rank}"
-    )
-    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+    chat = update.effective_chat
 
-# 4️⃣ الترحيب بالأعضاء الجدد 👋
-async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    for member in update.message.new_chat_members:
-        if member.id == context.bot.id:
-            await update.message.reply_text("أنا جيت يا شباب! 🥳🔥 ارفعوني مشرف عشان أحمي الجروب بسرعة 🚀")
-            continue
-            
-        username = f"@{member.username}" if member.username else "من غير يوزر"
-        text = (
-            f"يا ألف نهار أبيض! 🎉✨\n"
-            f"نورت الجروب يا غالي **{member.first_name}** ({username}) ❤️\n\n"
-            f"أهلاً بيك معانا، نسينا نكتمك بالقهوة! ☕️😂\n"
-            f"اطمئن على القوانين من أمر `/rules` وانسجم معانا! 🔥"
-        )
-        await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
-
-# 5️⃣ وداع الأعضاء عند المغادرة 🥹👋
-async def goodbye_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    member = update.message.left_chat_member
-    if member.id == context.bot.id:
-        return
-        
-    username = f"@{member.username}" if member.username else ""
-    text = f"مع السلامة يا **{member.first_name}** {username} 🥹👋\nتوصل بالسلامة يا غالي ونتمنى نشوفك تاني قريباً! 💔"
-    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
-
-# 6️⃣ إضافة وحذف الردود التلقائية 💬
-async def add_reply_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
-    
-    member = await context.bot.get_chat_member(chat_id, user_id)
-    if member.status not in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
-        await update.message.reply_text("❌ ده أمر للمشرفين بس يا بطل!")
+    if not user or user.is_bot:
         return
 
-    # صيغة الأمر: /addreply الكلمة | الرد
-    text = " ".join(context.args)
-    if "|" not in text:
-        await update.message.reply_text("⚠️ **الطريقة الصح:**\n`/addreply الكلمة | الرد بتاعها`\n\nمثال:\n`/addreply منور | بنورك يا عسل`", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    word, reply = map(str.strip, text.split("|", 1))
-    chat_settings[chat_id]["replies"][word.lower()] = reply
-    await update.message.reply_text(f"✅ تم إضافة الرد بنجاح!\n\n🔹 **عند كتابة:** {word}\n🔹 **البوت هيرد بـ:** {reply}")
-
-# 7️⃣ معالجة الرسائل (كشف كسر الحماية، كشف التغييرات، والردود) 🕵️‍♂️🛑
-async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.message.text:
-        return
-
-    chat_id = update.effective_chat.id
-    user = update.effective_user
-    text = update.message.text
     user_id = user.id
+    current_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+    current_username = user.username or "بدون يوزر"
 
-    # --- أ: كشف تغيير الاسم أو اليوزر 🕵️‍♂️ ---
-    current_name = user.first_name or ""
-    current_username = f"@{user.username}" if user.username else "مفيش يوزر"
+    # فحص السجل المسبق للمستخدم
+    if user_id in user_history:
+        old_data = user_history[user_id]
+        old_name = old_data.get("name")
+        old_username = old_data.get("username")
 
-    if user_id in user_cache:
-        old_data = user_cache[user_id]
         changes = []
-        if old_data["name"] != current_name:
-            changes.append(f"✏️ **الاسم القديم:** `{old_data['name']}`\n✏️ **الاسم الجديد:** `{current_name}`")
-        if old_data["username"] != current_username:
-            changes.append(f"ر **اليوزر القديم:** `{old_data['username']}`\nر **اليوزر الجديد:** `{current_username}`")
+        if old_name != current_name:
+            changes.append(f"📝 **الاسم السابق:** {old_name}\n📝 **الاسم الجديد:** {current_name}")
+        if old_username != current_username:
+            changes.append(f"🔗 **اليوزر السابق:** @{old_username}\n🔗 **اليوزر الجديد:** @{current_username}")
 
-        if changes:
-            alert = (
-                f"🚨 **قفشة جديدة! العضو ده غير بياناته توه!** 📢\n\n"
-                f"👤 **العضو:** {current_name} ({current_username})\n\n" + "\n\n".join(changes)
+        # إذا تم كشف أي تغيير وكان التفاعل داخل مجموعة
+        if changes and chat and chat.type in ['group', 'supergroup']:
+            alert_msg = (
+                "🚨 **تنبيه أمني: كشف تغيير بيانات حساب**\n"
+                "----------------------------------\n"
+                f"👤 **المستخدم:** [{current_name}](tg://user?id={user_id})\n"
+                f"🆔 **المعرف الرقمي:** `{user_id}`\n\n"
+                "⚠️ **التغييرات التي تمت مؤخراً:**\n" +
+                "\n\n".join(changes) +
+                "\n\n🛑 *ملاحظة: هذا التنبيه آلي لمنع محاولات انتحال الشخصيات أو الاحتيال.*"
             )
-            await update.message.reply_text(alert, parse_mode=ParseMode.MARKDOWN)
+            await context.bot.send_message(
+                chat_id=chat.id,
+                text=alert_msg,
+                parse_mode="Markdown"
+            )
 
-    # تحديث البيانات المخزنة
-    user_cache[user_id] = {"name": current_name, "username": current_username}
+    # تحديث بيانات المستخدم في السجل
+    user_history[user_id] = {
+        "name": current_name,
+        "username": current_username
+    }
 
-    # --- ب: الحماية من الروابط (Anti-Link) 🛑 ---
-    settings = chat_settings[chat_id]
-    if settings["anti_link"]:
-        # التحقق لو العضو مش مشرف
-        member = await context.bot.get_chat_member(chat_id, user_id)
-        if member.status not in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
-            link_pattern = r"(https?://|www\.|t\.me/)"
-            if re.search(link_pattern, text):
-                try:
-                    await update.message.delete()
-                    await context.bot.send_message(
-                        chat_id, 
-                        f"⛔ ممنوع نشر الروابط هنا يا **{user.first_name}**! مسحت رسالتك 🚫"
-                    )
-                    return
-                except Exception:
-                    pass
+# ==========================================
+# 4. أمر البداية والقائمة الرئيسية (/start)
+# ==========================================
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    bot_info = await context.bot.get_me()
+    bot_username = bot_info.username
 
-    # --- ج: الردود التلقائية 💬 ---
-    clean_text = text.strip().lower()
-    replies = settings["replies"]
-    if clean_text in replies:
-        await update.message.reply_text(replies[clean_text])
+    keyboard = [
+        [InlineKeyboardButton("أضفني إلى مجموعة ➕", url=f"https://t.me/{bot_username}?startgroup=true")],
+        [InlineKeyboardButton("إعدادات المجموعة ✍️", callback_data="settings_page_1")],
+        [
+            InlineKeyboardButton("المجموعة 👥", url="https://t.me/telegram"),
+            InlineKeyboardButton("القناة 📢", url="https://t.me/telegram")
+        ],
+        [
+            InlineKeyboardButton("الدعم ⛑️", url="https://t.me/telegram"),
+            InlineKeyboardButton("معلومات 💬", callback_data="info_btn")
+        ],
+        [InlineKeyboardButton("Languages 🇸🇦", callback_data="lang_btn")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
 
-# 8️⃣ أوامر القوانين والإعدادات 📜⚙️
-async def rules_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    rules = chat_settings[chat_id]["rules"]
-    await update.message.reply_text(f"📜 **قوانين الجروب:**\n\n{rules}", parse_mode=ParseMode.MARKDOWN)
+    welcome_text = (
+        "السلام عليكم ورحمة الله وبركاته؛\n\n"
+        "مرحباً بك. نظام الإدارة والتأمين الرقمي في خدمتك.\n\n"
+        "أنشئ هذا البوت بهدف فرض النظام الإداري، حماية المجموعات، والحد من محاولات التسلل والاحتيال بدقة وحزم.\n\n"
+        "⚙️ **البوت تم صناعته من الصفر وتم تطويره من قبل @jkrvagner**\n\n"
+        "📌 **أوامر التشغيل والإدارة:**\n"
+        "اضغط على /help للوصول إلى كافة الأوامر الإدارية والتعليمات التنفيذية."
+    )
 
-async def setrules_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
-    
-    member = await context.bot.get_chat_member(chat_id, user_id)
-    if member.status not in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
-        await update.message.reply_text("❌ للمشرفين بس يا بطل!")
-        return
+    if update.message:
+        await update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode="Markdown")
+    elif update.callback_query:
+        await update.callback_query.message.edit_text(welcome_text, reply_markup=reply_markup, parse_mode="Markdown")
 
-    new_rules = " ".join(context.args)
-    if not new_rules:
-        await update.message.reply_text("⚠️ اكتب القوانين بعد الأمر يا غالي!")
-        return
+# ==========================================
+# 5. صفحات الإعدادات
+# ==========================================
 
-    chat_settings[chat_id]["rules"] = new_rules
-    await update.message.reply_text("✅ تم حفظ القوانين الجديدة بنجاح! 🎉")
+# الصفحة الأولى للإعدادات (الصورة الثانية)
+async def show_settings_page_1(query):
+    keyboard = [
+        [InlineKeyboardButton("القوانين 📜", callback_data="set_rules"), InlineKeyboardButton("مانع الرسائل المزعجة ✉️", callback_data="set_antispam")],
+        [InlineKeyboardButton("الترحيب 💬", callback_data="set_welcome"), InlineKeyboardButton("مانع الرسائل المكررة 🗣️", callback_data="set_antiflood")],
+        [InlineKeyboardButton("وداعاً 🖐️", callback_data="set_goodbye"), InlineKeyboardButton("الحروف الهجائية 🕉️", callback_data="set_charfilter")],
+        [InlineKeyboardButton("التحقق Captcha 🧠", callback_data="set_captcha"), InlineKeyboardButton("القيود 🔦", callback_data="set_restrictions")],
+        [InlineKeyboardButton("تقرير admin@ 🆘", callback_data="set_reports"), InlineKeyboardButton("حظر 🔐", callback_data="set_ban")],
+        [InlineKeyboardButton("الوسائط 📸", callback_data="set_media"), InlineKeyboardButton("إباحية 🔞", callback_data="set_nsfw")],
+        [InlineKeyboardButton("الإنذارات ❗️", callback_data="set_warns"), InlineKeyboardButton("الوضع ليلي 🌙", callback_data="set_nightmode")],
+        [InlineKeyboardButton("تنبيه Tag 🔔", callback_data="set_tag"), InlineKeyboardButton("رابط المجموعة 🔗", callback_data="set_link")],
+        [InlineKeyboardButton("البوت الحارس 🕵️‍♂️ NEW", callback_data="set_guardian")],
+        [InlineKeyboardButton("وضع الموافقة 🎟️", callback_data="set_approval")],
+        [InlineKeyboardButton("حذف الرسائل 🗑️", callback_data="set_delmsg")],
+        [
+            InlineKeyboardButton("Lang 🇸🇦", callback_data="lang_btn"),
+            InlineKeyboardButton("إغلاق ✅", callback_data="close_menu"),
+            InlineKeyboardButton("أخرى ▶️", callback_data="settings_page_2")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    text = "⚙️ **لوحة التحكم وإعدادات المجموعة (الصفحة 1):**\n\nحدد البند الذي ترغب في ضبطه وتعديل ضوابطه الإدارية:"
+    await query.message.edit_text(text, reply_markup=reply_markup, parse_mode="Markdown")
 
-# تشغيل البوت 🚀
+# الصفحة الثانية للإعدادات - أخرى (الصورة الثالثة)
+async def show_settings_page_2(query):
+    keyboard = [
+        [InlineKeyboardButton("الموضوع 📦", callback_data="set_topic")],
+        [InlineKeyboardButton("الكلمات المحظورة abc", callback_data="set_badwords")],
+        [InlineKeyboardButton("تكرار الرسائل 🗣️", callback_data="set_repeat")],
+        [InlineKeyboardButton("إدارة الأعضاء 👥", callback_data="set_members")],
+        [InlineKeyboardButton("المستخدمون المتخفون 🪞", callback_data="set_ghosts")],
+        [InlineKeyboardButton("مجموعة المناقشة 📣 NEW", callback_data="set_discussion")],
+        [InlineKeyboardButton("الأوامر الشخصية 🧮", callback_data="set_customcmds")],
+        [InlineKeyboardButton("ملصقات سحرية وصور متحركة 🎭", callback_data="set_stickers")],
+        [InlineKeyboardButton("الرسائل الطويلة ✏️", callback_data="set_longmsg")],
+        [InlineKeyboardButton("إدارة القنوات 📣 NEW", callback_data="set_channels")],
+        [InlineKeyboardButton("أدونات 📝", callback_data="set_notes"), InlineKeyboardButton("قناة سجل المجموعة 🔍", callback_data="set_logchannel")],
+        [
+            InlineKeyboardButton("العودة ◀️", callback_data="settings_page_1"),
+            InlineKeyboardButton("إغلاق ✅", callback_data="close_menu"),
+            InlineKeyboardButton("Lang 🇸🇦", callback_data="lang_btn")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    text = "⚙️ **لوحة التحكم وإعدادات المجموعة (الصفحة 2 - خيارات إضافية):**\n\nاختر الإعداد المتقدم المراد تعيينه:"
+    await query.message.edit_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+
+# ==========================================
+# 6. معالج الضغط على الأزرار (Callbacks)
+# ==========================================
+async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+
+    if data == "settings_page_1":
+        await show_settings_page_1(query)
+    elif data == "settings_page_2":
+        await show_settings_page_2(query)
+    elif data == "close_menu":
+        await query.message.delete()
+    elif data == "info_btn":
+        await query.answer("نظام أمني رسمي مخصص لحماية وتأمين المجموعات وضبط صلاحيات الأعضاء.\nمطور البوت: @jkrvagner", show_alert=True)
+    elif data == "lang_btn":
+        await query.answer("اللغة المعتمدة حالياً: اللغة العربية 🇸🇦", show_alert=True)
+    elif data.startswith("set_"):
+        setting_key = data.replace("set_", "").upper()
+        await query.answer(f"تم فتح إعدادات: {setting_key}", show_alert=True)
+
+# ==========================================
+# 7. تشغيل البوت وإدارة المعالجات
+# ==========================================
 def main():
-    app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
+    if not BOT_TOKEN:
+        print("خطأ أمني: BOT_TOKEN غير موجود في متغيرات البيئة!")
+        return
 
-    # الأوامر الأساسية
-    app.add_handler(CommandHandler("start", start_command))
-    app.add_handler(CommandHandler("rank", rank_command))
-    app.add_handler(CommandHandler("rules", rules_command))
-    app.add_handler(CommandHandler("setrules", setrules_command))
-    app.add_handler(CommandHandler("addreply", add_reply_command))
+    application = Application.builder().token(BOT_TOKEN).build()
 
-    # الترحب والوداع
-    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_member))
-    app.add_handler(MessageHandler(filters.StatusUpdate.LEFT_CHAT_MEMBER, goodbye_member))
+    # معالجة الأوامر والقوائم
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CallbackQueryHandler(callback_handler))
 
-    # فحص الرسائل المباشر
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_messages))
+    # معالج كشف تغيير الأسماء على كافة الرسائل
+    application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, track_user_changes))
 
-    print("🤖 البوت شغال الآن بنجاح...")
-    app.run_polling()
+    # بدء الاستماع للرسائل
+    print("جاري تشغيل خادم البوت بنجاح...")
+    application.run_polling()
 
 if __name__ == "__main__":
     main()
